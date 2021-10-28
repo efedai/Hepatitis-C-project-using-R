@@ -1,0 +1,386 @@
+---
+title: "HCV Classification Model project"
+author: "Elias Fedai"
+date: "12/7/2020"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(reticulate)
+packageVersion('reticulate')
+```
+
+```{r}
+df1<- read.csv(file.choose(), header=T) 
+```
+### checking the shape of the data
+```{python}
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
+import seaborn as sns
+
+
+df1_py= r.df1
+df1_py.shape
+```
+
+
+### checking the data type
+```{python}
+df1_py.info()
+```
+
+** seeing if any null values are present.
+```{python}
+df1_py.isnull().sum()
+```
+
+### checking data spread. Getting a summary of all the numerical variables in the data
+```{python}
+print("Describe Data")
+print(df1_py.describe())     
+
+```
+### Dropping null values.
+```{python}
+data_py = df1_py.dropna()
+
+```
+### verifiying null values are removed
+```{python}
+data_py.isnull().sum()
+```
+
+
+### bar graph of distribution of categorical variables
+```{python}
+data_py.Category.value_counts(normalize=True)
+data_py.Category.value_counts(normalize=True).plot.barh()
+plt.show()
+```
+
+```{python}
+plt.scatter(data_py.BIL,data_py.PROT)
+plt.title('Bil vs Prot')
+plt.xlabel('Bil')
+plt.ylabel('Prot')
+plt.show()
+```
+```{python}
+plt.scatter(data_py.ALT,data_py.AST)
+plt.title('ALT vs AST')
+plt.xlabel('ALT')
+plt.ylabel('AST')
+plt.show()
+```
+
+### Boxplot of ALP
+```{python}
+data_py.boxplot(column=['ALP'])
+plt.title('ALP')
+plt.show()
+```
+### Switching dataframe to R and dropping unneeded column
+```{r}
+data3<- py$data_py
+data3$X <- NULL
+```
+
+```{r}
+levels(data3$Category)
+
+```
+
+```{R}
+levels(data3$Category)<- c('Blood Donor', 'Suspected HCV Blood Donor', 'Hepatitis C', 'Fibrosis', 'Cirrhosis')
+levels(data3$Category)
+
+```
+### Categorical plot by count
+```{r}
+library(tidyverse)
+ggplot(data = data3) +
+  geom_bar(mapping = aes(x = Category))
+```
+
+### COMPARING DISTRIBUTION OF ALP VALUES IN RESPECT TO CATEGORIES
+```{r}
+
+ggplot(data = data3, mapping = aes(x = ALP)) + 
+  geom_freqpoly(mapping = aes(colour = Category), binwidth = 500)
+```
+###COMPARING USING DENSITY INSTEAD OF COUNT TO STANDARDISE, AREA UNDER EACH FREQUENCY POLYGON IS ONE.
+```{r}
+ggplot(data = data3, mapping = aes(x = ALP, y = ..density..)) + 
+  geom_freqpoly(mapping = aes(colour = Category), binwidth = 500)
+```
+
+```{r}
+ggplot(data = data3, mapping = aes(x = Category, y = BIL)) +
+  geom_boxplot()
+
+
+```
+
+```{r}
+
+num_data3 <- data3[, sapply(data3, is.numeric)]
+cor(num_data3, use='complete.obs', method = 'pearson')
+cor(num_data3, use='complete.obs', method= 'spearman')
+```
+
+### covariance
+```{r}
+cov(num_data3)
+
+```
+
+```{r}
+library(dlookr)
+```
+
+### Normality chart/plot
+
+```{r}
+data3 %>%
+  normality() %>%
+  filter(p_value <= 0.01) %>% 
+  arrange(abs(p_value))
+```
+
+```{r}
+plot_normality(data3)
+
+```
+### correlation
+```{r}
+correlate(data3)
+
+```
+
+```{r}
+
+plot_correlate(data3)
+```
+### setting target variable for further EDA evaluation
+```{r}
+categor<- target_by(data3, Category)
+
+```
+
+```{r}
+cat_num <- relate(categor, Age)
+cat_num
+```
+
+```{r}
+summary(cat_num)
+
+```
+
+```{r}
+plot(cat_num)
+
+
+```
+
+```{r}
+cat_category<- relate(categor, Sex)
+cat_category
+summary(cat_category)
+```
+```{r}
+plot(cat_category)
+
+```
+### EDA evaluation summary
+```{r}
+data3 %>%
+  eda_report(target = Category, output_format = "html", output_file = "Prediction of HCV.html")
+```
+### Converting categorical variables into numerical for analysis using dummy variables
+
+
+```{r}
+data3$cat = as.integer(data3$Category)
+```
+### transforming numerical variables to log values
+```{r}
+data3$AST_log = log10(data3$AST)
+data3$BIL_log = log10(data3$BIL)
+data3$CREA_log = log10(data3$CREA)
+data3$GGT_log = log10(data3$GGT)
+data3$CHE_log = log10(data3$CHE)
+data3$ALT_log = log10(data3$ALT)
+data3$ALP_log = log10(data3$ALP)
+```
+### dropping unwanted variables
+```{r}
+new_data<- subset(data3, select= -c(Category,BIL, AST, CREA, GGT, CHE, Sex, ALT, ALP))
+
+```
+### reevaluating normality
+```{r}
+normality(new_data)
+
+
+```
+
+
+```{r}
+library(caret)
+library(mlbench)
+library(lattice)
+library(ggplot2)
+library('e1071')
+library(knitr)
+library(caTools)
+
+```
+### setting target variable to factor
+```{r}
+new_data$Cat <- as.factor(new_data$cat)
+correct_data<- subset(new_data, select= -c(cat))
+```
+### Splitting data into train/test 75/15
+```{r}
+correct_data$Cat <- as.factor(correct_data$Cat)
+set.seed(12000)
+inTrain <- createDataPartition(y = correct_data$Cat,p = .75,list = FALSE)
+str(inTrain)
+```
+```{r}
+training <- correct_data[ inTrain,]
+testing  <- correct_data[-inTrain,]
+
+```
+### because of the skewed categorical target. Upsampling the training set to even the distribution 
+```{r}
+set.seed(12000)
+up_train <- upSample(x = training[, -ncol(training)],y = training$Cat)
+up_train$cat <- up_train$Class
+up_train <- subset(up_train, select= -c(Class))
+table(up_train$cat)
+up_train
+
+```
+### running a 10 fold cross validation on the train set 
+```{r}
+
+ctrl <- trainControl(method='repeatedcv', repeats=3, classProbs = TRUE, summaryFunction = multiClassSummary)
+metric <- 'logLoss'
+
+
+control <- trainControl(method='repeatedcv', repeats=3)
+metric <- 'logLoss'
+```
+
+```{r}
+set.seed(12000)
+library(MLmetrics)
+gbmFit_up <- train(make.names(cat)~., data= up_train, method= 'gbm', preProc = c('center', 'scale'), tuneLength=4, trControl = ctrl, metric=metric)
+```
+
+```{r}
+
+
+gbmFits_up <- train(cat~., data= up_train, method= 'gbm', preProc = c('center', 'scale'), tuneLength=4, trControl = control)
+
+```
+
+
+### SVM Model
+```{r}
+set.seed(12000)
+svm_up <- train(make.names(cat)~., data=up_train, method='svmRadial', metric=metric, preProc= c('center', 'scale'), tuneLength=4, trControl= ctrl)
+```
+
+```{r}
+
+
+```
+### (slda) Stabilized Linear Discriminant Analysis
+```{r}
+set.seed(12000)
+slda_up <- train(make.names(cat)~., data=up_train, method="slda", metric=metric, trControl=ctrl,tuneLength=4, preProcess = c("center", "scale") )
+
+```
+
+
+### Nearest Shrunken Centroids
+```{r}
+set.seed(12000)
+pam_up <- train(make.names(cat)~., data=up_train, method='pam',metric=metric,preProc= c('center', 'scale'), tuneLength=4, trControl= ctrl)
+
+
+```
+
+### penalized discriminant analysis
+```{r}
+set.seed(12000)
+pda_up <- train(make.names(cat)~., data=up_train, method='pda',metric=metric,preProc= c('center', 'scale'), trControl= ctrl)
+```
+### resampling to generate chart to compare different models.
+```{r}
+resamps<- resamples(list(GBM= gbmFit_up, SVM= svm_up, PAM= pam_up, PDA= pda_up, SLDA= slda_up))
+resamps
+```
+```{r}
+summary(resamps)
+
+```
+### setting parameters to display model comparisons visually
+```{r}
+theme1 <- trellis.par.get()
+theme1$plot.symbol$col = rgb(.2, .2, .2, .4)
+theme1$plot.symbol$pch = 16
+theme1$plot.line$col = rgb(1, 0, 0, .7)
+theme1$plot.line$lwd <- 2
+trellis.par.set(theme1)
+bwplot(resamps, layout = c(3, 1))
+
+```
+### dot plot of model metrics
+```{r}
+dotplot(resamps)
+
+
+```
+### blandAltman accuracy chart
+```{r}
+trellis.par.set(theme1)
+xyplot(resamps, what = "BlandAltman")
+
+```
+
+```{r}
+splom(resamps)
+
+```
+
+
+
+### Predicting using the test set on GBM model and using a confusion matrix to determine accuracy of model. 
+```{r}
+
+
+gbmPredict_up <- predict(gbmFits_up, testing)
+
+cmGBM_up <- confusionMatrix(table(gbmPredict_up, testing$Cat))
+cmGBM_up
+```
+
+
+
+
+
+
+
+
